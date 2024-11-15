@@ -35,7 +35,148 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# [Las clases Gender, EffortInput y MarathonInput se mantienen igual...]
+class Gender(str, Enum):
+    hombre = "hombre"
+    mujer = "mujer"
+
+class EffortInput(BaseModel):
+    edad: int
+    sexo: Gender
+    peso: float
+    frecuencia_cardiaca_reposo: int
+    frecuencia_cardiaca_maxima: int
+    frecuencia_cardiaca_promedio: int
+    tiempo_zona_1: float
+    tiempo_zona_2: float
+    tiempo_zona_3: float
+    tiempo_zona_4: float
+    tiempo_zona_5: float
+
+    @validator('edad')
+    def validate_edad(cls, v):
+        if v < 18 or v > 100:
+            raise ValueError('La edad debe estar entre 18 y 100 años')
+        return v
+
+    @validator('peso')
+    def validate_peso(cls, v):
+        if v <= 0 or v > 200:
+            raise ValueError('El peso debe estar entre 0 y 200 kg')
+        return v
+
+    @validator('frecuencia_cardiaca_reposo')
+    def validate_fcr(cls, v):
+        if v < 40 or v > 120:
+            raise ValueError('La frecuencia cardíaca en reposo debe estar entre 40 y 120 bpm')
+        return v
+
+    @validator('frecuencia_cardiaca_maxima')
+    def validate_fcm(cls, v, values):
+        if 'frecuencia_cardiaca_reposo' in values:
+            if v <= values['frecuencia_cardiaca_reposo']:
+                raise ValueError('La FCM debe ser mayor que la FC en reposo')
+        if v < 100 or v > 220:
+            raise ValueError('La frecuencia cardíaca máxima debe estar entre 100 y 220 bpm')
+        return v
+
+    @validator('frecuencia_cardiaca_promedio')
+    def validate_fcp(cls, v, values):
+        if 'frecuencia_cardiaca_reposo' in values and 'frecuencia_cardiaca_maxima' in values:
+            if v < values['frecuencia_cardiaca_reposo'] or v > values['frecuencia_cardiaca_maxima']:
+                raise ValueError('La FC promedio debe estar entre la FC reposo y la FC máxima')
+        return v
+
+    @validator('tiempo_zona_1', 'tiempo_zona_2', 'tiempo_zona_3', 'tiempo_zona_4', 'tiempo_zona_5')
+    def validate_tiempos(cls, v):
+        if v < 0:
+            raise ValueError('Los tiempos en zona deben ser positivos')
+        return v
+
+class MarathonInput(BaseModel):
+    AGE: int
+    RunType: Literal['Outdoor', 'Indoor']
+    SubTime: float
+    SubDistance: float
+    Wall21: float
+    km4week: float
+    sp4week: float
+    CrossTraining: str
+    Wall21_Marathon: float
+    PRECIP_mm: float
+    SUNSHINE_hrs: float
+    CLOUD_hrs: float
+    ATMOS_PRESS_mbar: float
+    AVG_TEMP_C: float
+    MAX_TEMP_C: float
+    MIN_TEMP_C: float
+    GENDER: int  # 0 o 1
+
+    @validator('AGE')
+    def validate_age(cls, v):
+        if v < 18 or v > 100:
+            raise ValueError('La edad debe estar entre 18 y 100 años')
+        return v
+
+    @validator('CrossTraining')
+    def validate_cross_training(cls, v):
+        if not v.endswith('h'):
+            raise ValueError('CrossTraining debe terminar con "h" (ejemplo: "5h")')
+        try:
+            hours = float(v[:-1])
+            if hours < 0 or hours > 100:
+                raise ValueError('Las horas de CrossTraining deben estar entre 0 y 100')
+        except ValueError:
+            raise ValueError('Formato inválido para CrossTraining')
+        return v
+
+    @validator('GENDER')
+    def validate_gender(cls, v):
+        if v not in [0, 1]:
+            raise ValueError('GENDER debe ser 0 o 1')
+        return v
+
+    @validator('SubTime')
+    def validate_subtime(cls, v):
+        if v <= 0:
+            raise ValueError('SubTime debe ser mayor que 0')
+        return v
+
+    @validator('SubDistance')
+    def validate_subdistance(cls, v):
+        if v <= 0:
+            raise ValueError('SubDistance debe ser mayor que 0')
+        return v
+
+    @validator('Wall21')
+    def validate_wall21(cls, v):
+        if v <= 0:
+            raise ValueError('Wall21 debe ser mayor que 0')
+        return v
+
+    @validator('km4week')
+    def validate_km4week(cls, v):
+        if v < 0:
+            raise ValueError('km4week no puede ser negativo')
+        return v
+
+    @validator('sp4week')
+    def validate_sp4week(cls, v):
+        if v < 0:
+            raise ValueError('sp4week no puede ser negativo')
+        return v
+
+    @validator('ATMOS_PRESS_mbar')
+    def validate_pressure(cls, v):
+        if v < 800 or v > 1200:
+            raise ValueError('La presión atmosférica debe estar entre 800 y 1200 mbar')
+        return v
+
+    @validator('AVG_TEMP_C')
+    def validate_avg_temp(cls, v, values):
+        if 'MIN_TEMP_C' in values and 'MAX_TEMP_C' in values:
+            if not (values['MIN_TEMP_C'] <= v <= values['MAX_TEMP_C']):
+                raise ValueError('La temperatura promedio debe estar entre la mínima y la máxima')
+        return v
 
 # Inicialización de la aplicación FastAPI con más metadatos
 app = FastAPI(
@@ -60,12 +201,12 @@ app = FastAPI(
     ]
 )
 
-# Middleware CORS (solo una vez)
+# Middleware CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
-    allow_methods=["GET", "POST"],  # Especificamos solo los métodos que usamos
+    allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )
 
@@ -87,18 +228,6 @@ except Exception as e:
 
 @app.post("/predict", response_model=Dict[str, Any], tags=["predicción"])
 async def predict_marathon(input_data: MarathonInput) -> Dict[str, Any]:
-    """
-    Predice el tiempo de maratón basado en los datos de entrada proporcionados.
-    
-    Args:
-        input_data: Datos del corredor y condiciones de la carrera
-        
-    Returns:
-        Dict con el tiempo predicho en horas y las unidades
-        
-    Raises:
-        HTTPException: Si hay algún error durante la predicción
-    """
     try:
         logger.debug(f"Datos recibidos: {input_data.dict()}")
         input_dict = input_data.dict()
@@ -120,19 +249,38 @@ async def predict_marathon(input_data: MarathonInput) -> Dict[str, Any]:
 
 @app.post("/calculate-effort", response_model=Dict[str, Any], tags=["esfuerzo"])
 async def calculate_effort(input_data: EffortInput) -> Dict[str, Any]:
-    """
-    Calcula el esfuerzo relativo y escalado basado en los datos de entrada.
-    
-    Args:
-        input_data: Datos del ejercicio y del usuario
-        
-    Returns:
-        Dict con el esfuerzo relativo y escalado
-    """
     try:
         logger.debug(f"Datos recibidos para cálculo de esfuerzo: {input_data.dict()}")
         
-        # [El resto del código se mantiene igual...]
+        # Pesos para cada zona
+        pesos_zonas = [1, 2, 4, 8, 16]
+        
+        # Definir el factor de sexo
+        factor_sexo = 1 if input_data.sexo == Gender.hombre else 0.9
+        
+        # Calcular el factor de edad
+        factor_edad = 1 - 0.02 * ((input_data.edad - 30) / 10)
+        
+        # Calcular el esfuerzo relativo en base a tiempo en zona y pesos
+        esfuerzo_zonas = (
+            input_data.tiempo_zona_1 * pesos_zonas[0] +
+            input_data.tiempo_zona_2 * pesos_zonas[1] +
+            input_data.tiempo_zona_3 * pesos_zonas[2] +
+            input_data.tiempo_zona_4 * pesos_zonas[3] +
+            input_data.tiempo_zona_5 * pesos_zonas[4]
+        )
+        
+        # Calcular la proporción de la frecuencia cardíaca
+        rango_fc = input_data.frecuencia_cardiaca_maxima - input_data.frecuencia_cardiaca_reposo
+        proporcion_fc = (input_data.frecuencia_cardiaca_promedio - input_data.frecuencia_cardiaca_reposo) / rango_fc
+        
+        # Calcular el esfuerzo relativo total
+        esfuerzo_relativo = esfuerzo_zonas * factor_sexo * factor_edad * proporcion_fc
+        
+        # Escalar con una sigmoide para que esté entre 0 y 100
+        esfuerzo_escalado = float(1 / (1 + np.exp(-esfuerzo_relativo / 100)) * 100)
+        
+        logger.debug(f"Esfuerzo calculado - Relativo: {esfuerzo_relativo}, Escalado: {esfuerzo_escalado}")
         
         return {
             "status": "success",
@@ -156,12 +304,6 @@ async def calculate_effort(input_data: EffortInput) -> Dict[str, Any]:
 
 @app.get("/health", tags=["sistema"])
 async def health_check():
-    """
-    Endpoint para verificar el estado de la API.
-    
-    Returns:
-        Dict con el estado del servicio
-    """
     try:
         return {
             "status": "healthy",
